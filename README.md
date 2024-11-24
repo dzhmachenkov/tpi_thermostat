@@ -1,1 +1,3 @@
-# tpi_thermostat
+# TPI Thermostat for Home Assistant
+
+## Installation
