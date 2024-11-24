@@ -1,0 +1,12 @@
+{
+  "codeowners": ["@dzhmachenkov"],
+  "config_flow": true,
+  "dependencies": ["sensor", "switch"],
+  "documentation": "https://github.com/dzhmachenkov/tpi_thermostat",
+  "domain": "tpi_thermostat",
+  "integration_type": "helper",
+  "iot_class": "local_polling",
+  "name": "TPI Thermostat",
+  "requirements": [],
+  "version": "1.0.0"
+}
