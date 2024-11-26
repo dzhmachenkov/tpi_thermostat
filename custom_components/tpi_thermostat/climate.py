@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from datetime import datetime, timedelta
 import logging
 import math
+from collections.abc import Mapping
+from datetime import datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components.climate import (
     ATTR_PRESET_MODE,
     PLATFORM_SCHEMA as CLIMATE_PLATFORM_SCHEMA,
@@ -76,7 +75,6 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     SLOPE_TABLE,
-    ZERO_IN_KELVIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -282,7 +280,8 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         self._cycle_period = cycle_period
         self._slope_start: tuple[float, datetime] | None = None
         self._slope_end: tuple[float, datetime] | None = None
-        self._prev_cur_temp_in_kelvin: float | None = None
+        self._peak: str | None = None
+        self._prev_cur_temp: float | None = None
         self._prev_cur_temp_time: datetime | None = None
         self._attr_slope: float | None = None
         self._attr_kp: float | None = None
@@ -292,7 +291,7 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         self._last_pulse_time: datetime | None = None
         self._last_interval_time: datetime | None = None
         self._duty: float = 0.0
-        self._signal: bool = False
+        self._signal: bool | None = None
         self._pwm_interval: CALLBACK_TYPE | None = None
 
     @property
@@ -442,14 +441,6 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         """Return the temperature we try to reach."""
         return self._target_temp
 
-    @property
-    def _cur_temp_in_kelvin(self) -> float | None:
-        return None if self._cur_temp is None else self._cur_temp + ZERO_IN_KELVIN
-
-    @property
-    def _target_temp_in_kelvin(self) -> float | None:
-        return None if self._target_temp is None else self._target_temp + ZERO_IN_KELVIN
-
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set hvac mode."""
         if hvac_mode == HVACMode.HEAT:
@@ -461,6 +452,7 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         elif hvac_mode == HVACMode.OFF:
             self._hvac_mode = HVACMode.OFF
             if self._is_device_active:
+                self._pwm_stop()
                 await self._async_heater_turn_off()
         else:
             _LOGGER.error("Unrecognized hvac mode: %s", hvac_mode)
@@ -538,8 +530,8 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
                 raise ValueError(  # noqa: TRY301
                     f"Sensor has illegal state {state.state}"
                 )
-            if self._cur_temp_in_kelvin is not None:
-                self._prev_cur_temp_in_kelvin = self._cur_temp_in_kelvin
+            if self._cur_temp is not None:
+                self._prev_cur_temp = self._cur_temp
                 self._prev_cur_temp_time = self._cur_temp_time
             self._cur_temp = cur_temp
             self._cur_temp_time = datetime.now()
@@ -581,128 +573,100 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
                     _LOGGER.debug("Turning on heater %s", self.heater_entity_id)
                     await self._async_heater_turn_on()
             else:
-                assert isinstance(self._cur_temp_in_kelvin, float)
-                assert isinstance(self._target_temp_in_kelvin, float)
                 too_cold = (
-                    self._cur_temp_in_kelvin
-                    <= self._target_temp_in_kelvin - self._proportional_band / 2
+                    self._cur_temp <= self._target_temp - self._proportional_band / 2
                 )
                 too_hot = (
-                    self._cur_temp_in_kelvin
-                    >= self._target_temp_in_kelvin + self._proportional_band / 2
+                    self._cur_temp >= self._target_temp + self._proportional_band / 2
                 )
                 _LOGGER.debug(
                     "%s - Control heating: too_cold: %s too_hot: %s prev_temp: %s cur_temp: %s",
                     self.entity_id,
                     too_cold,
                     too_hot,
-                    self._prev_cur_temp_in_kelvin,
-                    self._cur_temp_in_kelvin,
+                    self._prev_cur_temp,
+                    self._cur_temp,
                 )
+
+                # get lowest and highgest temperature
+                if self._prev_cur_temp is not None:
+                    if self._prev_cur_temp < self._cur_temp and self._peak in [
+                        "falling",
+                        None,
+                    ]:
+                        self._peak = "rising"
+                        self._slope_start = (
+                            self._prev_cur_temp,
+                            self._prev_cur_temp_time,
+                        )
+                        self._slope_end = None
+
+                        _LOGGER.debug(
+                            "%s - Rising peak %s at %s",
+                            self.entity_id,
+                            self._slope_start[0],
+                            self._slope_start[1].strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+                    elif (
+                        self._prev_cur_temp > self._cur_temp and self._peak == "rising"
+                    ):
+                        self._peak = "falling"
+                        self._slope_end = (
+                            self._prev_cur_temp,
+                            self._prev_cur_temp_time,
+                        )
+
+                        _LOGGER.debug(
+                            "%s - Falling peak %s at %s",
+                            self.entity_id,
+                            self._slope_start[0],
+                            self._slope_start[1].strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+
+                        if (
+                            self._slope_start is not None
+                            and self._slope_end is not None
+                        ):
+                            self._attr_slope = self._calculate_slope()
+
+                            if self._attr_slope is not None:
+                                self._attr_kp, self._attr_ti = self._get_kd_and_ti(
+                                    self._attr_slope
+                                )
+                            elif self._pwm_interval is not None:
+                                self._pwm_stop()
+                            self.async_write_ha_state()
 
                 # If On/Off state
                 if self._attr_slope is None or self._pwm_interval is None:
-                    if self._is_device_active:
-                        if too_hot:
-                            _LOGGER.debug(
-                                "Turning off heater %s",
-                                self.heater_entity_id,
-                            )
-                            await self._async_heater_turn_off()
-                            if self._slope_start is not None:
-                                self._slope_end = (
-                                    self._cur_temp_in_kelvin,
-                                    datetime.now(),
-                                )
-                                _LOGGER.debug(
-                                    "%s - [slope end] T2: %s (%s)",
-                                    self.entity_id,
-                                    self._slope_end[0],
-                                    self._slope_end[1],
-                                )
-                                if (
-                                    self._slope_start is not None
-                                    and self._slope_end is not None
-                                ):
-                                    self._attr_slope = self._calculate_slope()
-
-                                    if self._attr_slope is not None:
-                                        self._attr_kp, self._attr_ti = (
-                                            self._get_kd_and_ti(self._attr_slope)
-                                        )
-                                    else:
-                                        self._attr_kp = None
-                                        self._attr_ti = None
-                                    self.async_write_ha_state()
+                    if self._is_device_active and too_hot:
+                        _LOGGER.debug(
+                            "Turning off heater %s",
+                            self.heater_entity_id,
+                        )
+                        await self._async_heater_turn_off()
                     elif too_cold:
                         _LOGGER.debug(
                             "Turning on heater %s",
                             self.heater_entity_id,
                         )
                         await self._async_heater_turn_on()
-                        self._slope_start = (
-                            self._cur_temp_in_kelvin,
-                            datetime.now(),
-                        )
-                        self._slope_end = None
-                        _LOGGER.debug(
-                            "%s - [slope start] T1: %s (%s)",
-                            self.entity_id,
-                            self._slope_start[0],
-                            self._slope_start[1],
-                        )
-                        if self._attr_slope is not None:
+
+                        if self._attr_slope is not None and self._pwm_interval is None:
                             self._pwm_start()
                 else:
-                    assert isinstance(self._prev_cur_temp_time, float)
-
                     if self._is_device_active and not self._signal:
                         _LOGGER.debug(
                             "Turning off heater %s",
                             self.heater_entity_id,
                         )
                         await self._async_heater_turn_off()
-                        if self._slope_start is not None:
-                            self._slope_end = (
-                                self._cur_temp_in_kelvin,
-                                datetime.now(),
-                            )
-                            _LOGGER.debug(
-                                "%s - [slope end] T2: %s (%s)",
-                                self.entity_id,
-                                self._slope_end[0],
-                                self._slope_end[1],
-                            )
-                            if (
-                                self._slope_start is not None
-                                and self._slope_end is not None
-                            ):
-                                self._attr_slope = self._calculate_slope()
-
-                                if self._attr_slope is not None:
-                                    self._attr_kp, self._attr_ti = self._get_kd_and_ti(
-                                        self._attr_slope
-                                    )
-                                elif self._pwm_interval is not None:
-                                    self._pwm_stop()
-                                self.async_write_ha_state()
                     elif not self._is_device_active and self._signal:
                         _LOGGER.debug(
                             "Turning on heater %s",
                             self.heater_entity_id,
                         )
                         await self._async_heater_turn_on()
-                        self._slope_start = (
-                            self._cur_temp_in_kelvin,
-                            datetime.now(),
-                        )
-                        self._slope_end = None
-                        _LOGGER.debug(
-                            "%s - [slope start] T1: %s (%s)",
-                            self.entity_id,
-                            self._slope_start[0],
-                            self._slope_start[1],
-                        )
 
     @property
     def _is_device_active(self) -> bool | None:
@@ -766,19 +730,13 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         out = 0 if out < 0 else min(out, 1)
         return (out, error)
 
-    def _get_pwm(self, t: datetime, d: float) -> bool:
-        pw = timedelta(self._cycle_period * d)
+    def _get_pwm(self, t: datetime, duty: float) -> bool:
+        pw = timedelta(seconds=self._cycle_period * duty)
 
         assert isinstance(self._last_pulse_time, datetime)
 
-        if self._last_pulse_time < t < self._last_pulse_time + pw:
+        if self._last_pulse_time <= t < self._last_pulse_time + pw:
             return True
-        if (
-            self._last_pulse_time + pw
-            < t
-            < self._last_pulse_time + timedelta(seconds=self._cycle_period)
-        ):
-            return False
         return False
 
     def _pwm_start(self) -> None:
@@ -787,16 +745,19 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         self._pwm_interval = async_track_time_interval(
             self.hass,
             self._async_pwm_interval_handler,
-            timedelta(seconds=self._cycle_period),
+            timedelta(seconds=60),
+            cancel_on_shutdown=True,
         )
         _LOGGER.debug("%s - PWM started", self.entity_id)
-        self._pwm_period_handler()
 
-    def _pwm_stop(self) -> None:
+    def _pwm_stop(self, clean: bool = True) -> None:
         self._signal = False
-        self._attr_slope = None
-        self._attr_kp = None
-        self._attr_ti = None
+
+        if clean:
+            self._attr_slope = None
+            self._attr_kp = None
+            self._attr_ti = None
+            self.async_write_ha_state()
 
         if self._pwm_interval is not None:
             self._pwm_interval()
@@ -839,29 +800,28 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         return result
 
     async def _async_pwm_interval_handler(self, time: datetime) -> None:
-        assert isinstance(self._cur_temp_in_kelvin, float)
-        assert isinstance(self._target_temp_in_kelvin, float)
-        assert isinstance(self._attr_kp, float)
-        assert isinstance(self._attr_ti, float)
+        _LOGGER.debug(
+            "%s - PWM interval handler: started %s.",
+            self.entity_id,
+            time.strftime("%Y/%m/%d %H:%M:%S"),
+        )
 
         if self._last_pulse_time is None:
             self._last_pulse_time = time
         else:
-            delta = (self._last_pulse_time - time).total_seconds()
+            delta = (time - self._last_pulse_time).total_seconds()
             if delta >= self._cycle_period:
                 self._last_pulse_time = time - timedelta(
                     seconds=delta % self._cycle_period
                 )
-        signal = self._signal
+        signal = self._signal if self._signal is not None else self._is_device_active
         ts = (
             0
             if self._last_interval_time is None
             else (time - self._last_interval_time).total_seconds()
         )
         self._last_interval_time = time
-        error = (
-            self._cur_temp_in_kelvin - self._target_temp_in_kelvin
-        ) / self._proportional_band
+        error = (self._cur_temp - self._target_temp) / self._proportional_band
         self._duty, self._tpi_error = self._calculate_tpi(
             error=error,
             kp=self._attr_kp,
@@ -874,7 +834,7 @@ class TPIThermostat(ClimateEntity, RestoreEntity):
         if signal != self._signal:
             await self._async_control_heating()
         _LOGGER.debug(
-            "%s - PWM interval last pulse time: %s, duty: %s, sifnal: %s",
+            "%s - PWM interval handler: last pulse time: %s, duty: %s, signal: %s",
             self.entity_id,
             (
                 self._last_pulse_time.strftime("%d/%m/%Y %H:%M:%S")
