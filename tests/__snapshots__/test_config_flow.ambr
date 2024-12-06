@@ -1,0 +1,57 @@
+# serializer version: 1
+# name: test_config_flow[create_entry]
+  dict({
+    'result': <ConfigEntry entry_id=01JDWCGKP40GYJ5K97CRGHQZHQ version=1 domain=tpi_thermostat title=My thermostat state=ConfigEntryState.LOADED unique_id=None>,
+    'title': 'My thermostat',
+    'type': <FlowResultType.CREATE_ENTRY: 'create_entry'>,
+  })
+# ---
+# name: test_config_flow[init]
+  dict({
+    'type': <FlowResultType.FORM: 'form'>,
+  })
+# ---
+# name: test_config_flow[presets]
+  dict({
+    'type': <FlowResultType.FORM: 'form'>,
+  })
+# ---
+# name: test_config_flow_preset_accepts_float[create_entry]
+  dict({
+    'result': <ConfigEntry entry_id=01JDWCGKQVJFFVX809QVAEQQPK version=1 domain=tpi_thermostat title=My thermostat state=ConfigEntryState.LOADED unique_id=None>,
+    'title': 'My thermostat',
+    'type': <FlowResultType.CREATE_ENTRY: 'create_entry'>,
+  })
+# ---
+# name: test_config_flow_preset_accepts_float[init]
+  dict({
+    'type': <FlowResultType.FORM: 'form'>,
+  })
+# ---
+# name: test_config_flow_preset_accepts_float[presets]
+  dict({
+    'type': <FlowResultType.FORM: 'form'>,
+  })
+# ---
+# name: test_options[create_entry]
+  dict({
+    'result': True,
+    'type': <FlowResultType.CREATE_ENTRY: 'create_entry'>,
+  })
+# ---
+# name: test_options[init]
+  dict({
+    'type': <FlowResultType.FORM: 'form'>,
+  })
+# ---
+# name: test_options[presets]
+  dict({
+    'type': <FlowResultType.FORM: 'form'>,
+  })
+# ---
+# name: test_options[with_away]
+  <state climate.my_thermostat=off; hvac_modes=[<HVACMode.HEAT: 'heat'>, <HVACMode.OFF: 'off'>], min_temp=7, max_temp=35, target_temp_step=0.1, preset_modes=['none', 'away'], current_temperature=15.0, temperature=7, hvac_action=off, preset_mode=none, thermostat_state=None, slope=None, kp=None, ti=None, friendly_name=My thermostat, supported_features=401 @ 2024-11-29T08:36:53.600971-08:00>
+# ---
+# name: test_options[without_away]
+  <state climate.my_thermostat=off; hvac_modes=[<HVACMode.HEAT: 'heat'>, <HVACMode.OFF: 'off'>], min_temp=7, max_temp=35, target_temp_step=0.1, current_temperature=15.0, temperature=7.0, hvac_action=off, thermostat_state=None, slope=None, kp=None, ti=None, friendly_name=My thermostat, supported_features=385 @ 2024-11-29T08:36:53.605391-08:00>
+# ---

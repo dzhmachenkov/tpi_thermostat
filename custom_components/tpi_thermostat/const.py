@@ -15,9 +15,7 @@ DOMAIN = "tpi_thermostat"
 PLATFORMS = [Platform.CLIMATE]
 
 CONF_AC_MODE = "ac_mode"
-CONF_COLD_TOLERANCE = "cold_tolerance"
 CONF_HEATER = "heater"
-CONF_HOT_TOLERANCE = "hot_tolerance"
 CONF_PRESETS = {
     p: f"{p}_temp"
     for p in (
@@ -32,7 +30,6 @@ CONF_PRESETS = {
 CONF_SENSOR = "target_sensor"
 CONF_PROPORTIONAL_BAND = "proportional_band"
 CONF_CYCLE_PERIOD = "cycle_period"
-DEFAULT_TOLERANCE = 0.3
 DEFAULT_PROPORTIONAL_BAND = 2
 DEFAULT_CYCLE_PERIOD = 300
 

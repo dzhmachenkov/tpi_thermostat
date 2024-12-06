@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 import voluptuous as vol
-
 from homeassistant.components import fan, switch
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN, SensorDeviceClass
 from homeassistant.const import CONF_NAME, DEGREE, UnitOfTime
@@ -18,16 +17,13 @@ from homeassistant.helpers.schema_config_entry_flow import (
 
 from .const import (
     CONF_AC_MODE,
-    CONF_COLD_TOLERANCE,
     CONF_CYCLE_PERIOD,
     CONF_HEATER,
-    CONF_HOT_TOLERANCE,
     CONF_PRESETS,
     CONF_PROPORTIONAL_BAND,
     CONF_SENSOR,
     DEFAULT_CYCLE_PERIOD,
     DEFAULT_PROPORTIONAL_BAND,
-    DEFAULT_TOLERANCE,
     DOMAIN,
 )
 
@@ -44,28 +40,14 @@ OPTIONS_SCHEMA = {
         selector.EntitySelectorConfig(domain=[fan.DOMAIN, switch.DOMAIN])
     ),
     vol.Required(
-        CONF_COLD_TOLERANCE, default=DEFAULT_TOLERANCE
-    ): selector.NumberSelector(
-        selector.NumberSelectorConfig(
-            mode=selector.NumberSelectorMode.BOX, unit_of_measurement=DEGREE, step=0.1
-        )
-    ),
-    vol.Required(
         CONF_PROPORTIONAL_BAND, default=DEFAULT_PROPORTIONAL_BAND
     ): selector.NumberSelector(
         selector.NumberSelectorConfig(
             mode=selector.NumberSelectorMode.BOX,
             unit_of_measurement=DEGREE,
             step=0.1,
-            min=1,
+            min=0.2,
             max=3,
-        )
-    ),
-    vol.Required(
-        CONF_HOT_TOLERANCE, default=DEFAULT_TOLERANCE
-    ): selector.NumberSelector(
-        selector.NumberSelectorConfig(
-            mode=selector.NumberSelectorMode.BOX, unit_of_measurement=DEGREE, step=0.1
         )
     ),
     vol.Required(
